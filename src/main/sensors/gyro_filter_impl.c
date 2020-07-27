@@ -62,11 +62,14 @@ static FAST_CODE void GYRO_FILTER_FUNCTION_NAME(void)
                 GYRO_FILTER_DEBUG_SET(DEBUG_FFT_FREQ, 2, lrintf(gyroADCf));
                 GYRO_FILTER_DEBUG_SET(DEBUG_DYN_LPF, 3, lrintf(gyroADCf));
             }
-            gyroDataAnalysePush(&gyro.gyroAnalyseState, axis, gyroADCf);
+            fftDataAnalysePush(&gyro.fftAnalyseState, axis, gyroADCf);
             gyroADCf = gyro.notchFilterDynApplyFn((filter_t *)&gyro.notchFilterDyn[axis][0], gyroADCf);
             gyroADCf = gyro.notchFilterDynApplyFn((filter_t *)&gyro.notchFilterDyn[axis][1], gyroADCf);
             gyroADCf = gyro.notchFilterDynApplyFn((filter_t *)&gyro.notchFilterDyn[axis][2], gyroADCf);
         }
+#endif
+#ifdef USE_DYN_LPF2
+        gyroADCf = dynLpf2Apply(axis, gyroADCf);
 #endif
         // DEBUG_GYRO_FILTERED records the scaled, filtered, after all software filtering has been applied.
         GYRO_FILTER_DEBUG_SET(DEBUG_GYRO_FILTERED, axis, lrintf(gyroADCf));

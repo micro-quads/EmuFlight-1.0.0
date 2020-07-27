@@ -32,6 +32,7 @@
 #include "common/maths.h"
 #include "common/filter.h"
 #include "common/kalman.h"
+#include "common/dynLpf2.h"
 #include "config/feature.h"
 
 #include "config/config.h"
@@ -265,9 +266,12 @@ void gyroInitFilters(void)
 #endif
 #ifdef USE_GYRO_DATA_ANALYSE
     gyro.dynNotchQ = gyroConfig()->dyn_notch_q / 100.0f;
-    gyroDataAnalyseStateInit(&gyro.gyroAnalyseState, gyro.targetLooptime);
+    fftDataAnalyseStateInit(&gyro.fftAnalyseState, gyro.targetLooptime, gyroConfig()->dyn_notch_min_hz, gyroConfig()->dyn_notch_max_hz);
 #endif
     kalman_init();
+#ifdef USE_DYN_LPF2
+    init_dynLpf2();
+#endif
 }
 
 #if defined(USE_GYRO_SLEW_LIMITER)

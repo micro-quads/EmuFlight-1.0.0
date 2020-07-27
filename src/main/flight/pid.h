@@ -24,6 +24,7 @@
 #include "common/time.h"
 #include "common/filter.h"
 #include "common/axis.h"
+#include "flight/gyroanalyse.h"
 
 #include "pg/pg.h"
 
@@ -169,8 +170,6 @@ typedef struct pidProfile_s {
     uint8_t launchControlAngleLimit;        // Optional launch control angle limit (requires ACC)
     uint8_t launchControlGain;              // Iterm gain used while launch control is active
     uint8_t launchControlAllowTriggerReset; // Controls trigger behavior and whether the trigger can be reset
-    uint8_t use_integrated_yaw;             // Selects whether the yaw pidsum should integrated
-    uint8_t integrated_yaw_relax;           // Specifies how much integrated yaw should be reduced to offset the drag based yaw component
     uint8_t thrustLinearization;            // Compensation factor for pid linearization
     uint8_t d_min[XYZ_AXIS_COUNT];          // Minimum D value on each axis
     uint8_t d_min_gain;                     // Gain factor for amount of gyro / setpoint activity required to boost D
@@ -194,6 +193,11 @@ typedef struct pidProfile_s {
     uint8_t dyn_lpf_curve_expo;             // set the curve for dynamic dterm lowpass filter
     uint8_t level_race_mode;                // NFE race mode - when true pitch setpoint calcualtion is gyro based in level mode
     uint8_t vbat_sag_compensation;          // Reduce motor output by this percentage of the maximum compensation amount
+
+    uint16_t dtermDynNotchQ;                // Q value for the dynamic dterm notch
+    uint16_t dterm_dyn_notch_min_hz;        // min hz for the dynamic dterm notch
+    uint16_t dterm_dyn_notch_max_hz;        // max hz for the dynamic dterm notch
+    uint8_t dterm_dyn_notch_location;       // location of the dyn dterm notch
 } pidProfile_t;
 
 PG_DECLARE_ARRAY(pidProfile_t, PID_PROFILE_COUNT, pidProfiles);
@@ -244,11 +248,18 @@ typedef struct pidRuntime_s {
     dtermLowpass_t dtermLowpass2[XYZ_AXIS_COUNT];
     filterApplyFnPtr ptermYawLowpassApplyFn;
     pt1Filter_t ptermYawLowpass;
+    filterApplyFnPtr dtermDynNotchApplyFn;
+    biquadFilter_t dtermNotchFilterDyn[XYZ_AXIS_COUNT];
+    fftAnalyseState_t dtermFFTAnalyseState;
     bool antiGravityEnabled;
     uint8_t antiGravityMode;
     pt1Filter_t antiGravityThrottleLpf;
+    pt1Filter_t antiGravityPSmoothLpf;
+    pt1Filter_t antiGravityDSmoothLpf;
     float antiGravityOsdCutoff;
     float antiGravityThrottleHpf;
+    float antiGravityPBoost;
+    float antiGravityDBoost;
     float ffBoostFactor;
     float ffSpikeLimitInverse;
     float itermAccelerator;
@@ -328,11 +339,6 @@ typedef struct pidRuntime_s {
     uint8_t launchControlMode;
     uint8_t launchControlAngleLimit;
     float launchControlKi;
-#endif
-
-#ifdef USE_INTEGRATED_YAW_CONTROL
-    bool useIntegratedYaw;
-    uint8_t integratedYawRelax;
 #endif
 
 #ifdef USE_THRUST_LINEARIZATION

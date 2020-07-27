@@ -127,7 +127,7 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .pid = {
             [PID_ROLL] =  { 42, 85, 35, 90 },
             [PID_PITCH] = { 46, 90, 38, 95 },
-            [PID_YAW] =   { 45, 90, 0, 90 },
+            [PID_YAW] =   { 60, 90, 0, 90 },
             [PID_LEVEL] = { 50, 50, 75, 0 },
             [PID_MAG] =   { 40, 0, 0, 0 },
         },
@@ -154,7 +154,7 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .throttle_boost = 5,
         .throttle_boost_cutoff = 15,
         .iterm_rotation = false,
-        .iterm_relax = ITERM_RELAX_RP,
+        .iterm_relax = ITERM_RELAX_RP_INC,
         .iterm_relax_cutoff = ITERM_RELAX_CUTOFF_DEFAULT,
         .iterm_relax_type = ITERM_RELAX_SETPOINT,
         .acro_trainer_angle_limit = 20,
@@ -180,15 +180,13 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .launchControlAngleLimit = 0,
         .launchControlGain = 40,
         .launchControlAllowTriggerReset = true,
-        .use_integrated_yaw = false,
-        .integrated_yaw_relax = 200,
-        .thrustLinearization = 0,
-        .d_min = { 23, 25, 0 },      // roll, pitch, yaw
+        .thrustLinearization = 15,
+        .d_min = { 0, 0, 0 },      // roll, pitch, yaw
         .d_min_gain = 37,
         .d_min_advance = 20,
         .motor_output_limit = 100,
         .auto_profile_cell_count = AUTO_PROFILE_CELL_COUNT_STAY,
-        .transient_throttle_limit = 0,
+        .transient_throttle_limit = 15,
         .profileName = { 0 },
         .idle_min_rpm = 0,
         .idle_adjustment_speed = 50,
@@ -202,12 +200,12 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .ff_boost = 15,
         .dyn_lpf_curve_expo = 5,
         .level_race_mode = false,
-        .vbat_sag_compensation = 0,
+        .vbat_sag_compensation = 100,
+        .dtermDynNotchQ = 250,
+        .dterm_dyn_notch_min_hz = 150,
+        .dterm_dyn_notch_max_hz = 600,
+        .dterm_dyn_notch_location = 0,
     );
-#ifndef USE_D_MIN
-    pidProfile->pid[PID_ROLL].D = 30;
-    pidProfile->pid[PID_PITCH].D = 32;
-#endif
 }
 
 void pgResetFn_pidProfiles(pidProfile_t *pidProfiles)
@@ -270,7 +268,32 @@ void pidResetIterm(void)
 void pidUpdateAntiGravityThrottleFilter(float throttle)
 {
     if (pidRuntime.antiGravityMode == ANTI_GRAVITY_SMOOTH) {
-        pidRuntime.antiGravityThrottleHpf = throttle - pt1FilterApply(&pidRuntime.antiGravityThrottleLpf, throttle);
+        // focus on low throttle range
+        // P boost 0.5 at zero throttle falling to 0 by half
+        if (throttle < 0.5f) {
+            pidRuntime.antiGravityPBoost = 0.5f - throttle;
+        } else {
+            pidRuntime.antiGravityPBoost = 0.0f;
+        }
+        // D boost 1.0 reducing with throttle value
+        pidRuntime.antiGravityDBoost = 1.0f - throttle;
+        // get the low-pass of throttle, to determine if throttle increasing or falling
+        pidRuntime.antiGravityThrottleHpf = pt1FilterApply(&pidRuntime.antiGravityThrottleLpf, throttle);
+        // set how much P and I boost when adding throttle
+        if (throttle > pidRuntime.antiGravityThrottleHpf) {
+            pidRuntime.antiGravityPBoost *= 0.5f;
+            pidRuntime.antiGravityDBoost *= pidRuntime.antiGravityThrottleHpf;
+        } else {
+            pidRuntime.antiGravityDBoost = 0.0f;
+        }
+        // calculate throttle high-pass as before, for use in AG code
+        pidRuntime.antiGravityThrottleHpf = fabsf(throttle - pidRuntime.antiGravityThrottleHpf);
+        // Modulate boost by how fast throttle is moving
+        pidRuntime.antiGravityPBoost *= pidRuntime.antiGravityThrottleHpf;
+        pidRuntime.antiGravityDBoost *= pidRuntime.antiGravityThrottleHpf;
+        // smooth the boost to remove the jagged edges
+        pidRuntime.antiGravityPBoost = pt1FilterApply(&pidRuntime.antiGravityPSmoothLpf, pidRuntime.antiGravityPBoost);
+        pidRuntime.antiGravityDBoost = pt1FilterApply(&pidRuntime.antiGravityDSmoothLpf, pidRuntime.antiGravityDBoost);
     }
 }
 
@@ -707,11 +730,11 @@ static FAST_CODE_NOINLINE float applyLaunchControl(int axis, const rollAndPitchT
 // Based on 2DOF reference design (matlab)
 void FAST_CODE pidController(const pidProfile_t *pidProfile)
 {
-    static float previousGyroRateDterm[XYZ_AXIS_COUNT];
+    static float previousGyroRate[XYZ_AXIS_COUNT];
 #ifdef USE_INTERPOLATED_SP
     static FAST_RAM_ZERO_INIT uint32_t lastFrameNumber;
 #endif
-    static float previousRawGyroRateDterm[XYZ_AXIS_COUNT];
+    static float previousRawGyroRate[XYZ_AXIS_COUNT];
 
     const float tpaFactor = getThrottlePIDAttenuation();
 
@@ -749,10 +772,25 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile)
 
     // Dynamic i component,
     if ((pidRuntime.antiGravityMode == ANTI_GRAVITY_SMOOTH) && pidRuntime.antiGravityEnabled) {
-        pidRuntime.itermAccelerator = fabsf(pidRuntime.antiGravityThrottleHpf) * 0.01f * (pidRuntime.itermAcceleratorGain - 1000);
-        DEBUG_SET(DEBUG_ANTI_GRAVITY, 1, lrintf(pidRuntime.antiGravityThrottleHpf * 1000));
+        // unchanged basic iTerm based itermAccelerator calculation
+        pidRuntime.itermAccelerator = pidRuntime.antiGravityThrottleHpf * 0.01f * pidRuntime.itermAcceleratorGain;
+        DEBUG_SET(DEBUG_ANTI_GRAVITY, 0, lrintf(pidRuntime.itermAccelerator * 1000));
+        // users AG Gain changes P and D boost
+        pidRuntime.antiGravityPBoost *= pidRuntime.itermAcceleratorGain;
+        pidRuntime.antiGravityDBoost *= pidRuntime.itermAcceleratorGain;
+        // add some percentage of the P boost factor to iTerm, to prolong AG effect on iTerm
+        pidRuntime.itermAccelerator += pidRuntime.antiGravityPBoost * 0.05f;
+        // set percentage of that boost factor to use to boost P and D
+        pidRuntime.antiGravityPBoost *= 0.02f;
+        pidRuntime.antiGravityDBoost *= 0.02f;
+        pidRuntime.antiGravityDBoost = fminf(0.4f, pidRuntime.antiGravityDBoost);
+    } else {
+        // no boost if no AG
+        pidRuntime.antiGravityPBoost = 0.0f;
+        pidRuntime.antiGravityDBoost = 0.0f;
     }
-    DEBUG_SET(DEBUG_ANTI_GRAVITY, 0, lrintf(pidRuntime.itermAccelerator * 1000));
+    // Debug 1 is the multiplier P
+    DEBUG_SET(DEBUG_ANTI_GRAVITY, 1, lrintf(pidRuntime.itermAccelerator * 1000));
 
     float agGain = pidRuntime.dT * pidRuntime.itermAccelerator * AG_KI;
 
@@ -762,10 +800,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile)
         dynCi *= constrainf((1.0f - getMotorMixRange()) * pidRuntime.itermWindupPointInv, 0.0f, 1.0f);
     }
 
-    // Precalculate gyro deta for D-term here, this allows loop unrolling
-    float gyroRateDterm[XYZ_AXIS_COUNT];
     for (int axis = FD_ROLL; axis <= FD_YAW; ++axis) {
-        gyroRateDterm[axis] = gyro.gyroADCf[axis];
         // -----calculate raw, unfiltered D component
 
         // Divide rate change by dT to get differential (ie dr/dt).
@@ -774,8 +809,8 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile)
         // calculated deltaT whenever another task causes the PID
         // loop execution to be delayed.
         const float delta =
-            - (gyroRateDterm[axis] - previousRawGyroRateDterm[axis]) * pidRuntime.pidFrequency / D_LPF_RAW_SCALE;
-        previousRawGyroRateDterm[axis] = gyroRateDterm[axis];
+            - (gyro.gyroADCf[axis] - previousRawGyroRate[axis]) * pidRuntime.pidFrequency / D_LPF_RAW_SCALE;
+        previousRawGyroRate[axis] = gyro.gyroADCf[axis];
 
         // Log the unfiltered D
         if (axis == FD_ROLL) {
@@ -783,10 +818,6 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile)
         } else if (axis == FD_PITCH) {
             DEBUG_SET(DEBUG_D_LPF, 1, lrintf(delta));
         }
-
-        gyroRateDterm[axis] = pidRuntime.dtermNotchApplyFn((filter_t *) &pidRuntime.dtermNotch[axis], gyroRateDterm[axis]);
-        gyroRateDterm[axis] = pidRuntime.dtermLowpassApplyFn((filter_t *) &pidRuntime.dtermLowpass[axis], gyroRateDterm[axis]);
-        gyroRateDterm[axis] = pidRuntime.dtermLowpass2ApplyFn((filter_t *) &pidRuntime.dtermLowpass2[axis], gyroRateDterm[axis]);
     }
 
     rotateItermAndAxisError();
@@ -929,8 +960,20 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile)
             // This is done to avoid DTerm spikes that occur with dynamically
             // calculated deltaT whenever another task causes the PID
             // loop execution to be delayed.
-            const float delta =
-                - (gyroRateDterm[axis] - previousGyroRateDterm[axis]) * pidRuntime.pidFrequency;
+            float delta = -(gyro.gyroADCf[axis] - previousGyroRate[axis]) * pidRuntime.pidFrequency;
+
+            if (pidProfile->dtermDynNotchQ > 0 && pidProfile->dterm_dyn_notch_location == 0) {
+                fftDataAnalysePush(&pidRuntime.dtermFFTAnalyseState, axis, delta);
+                delta = pidRuntime.dtermDynNotchApplyFn((filter_t *)&pidRuntime.dtermNotchFilterDyn[axis], delta);
+            }
+            delta = pidRuntime.dtermNotchApplyFn((filter_t *) &pidRuntime.dtermNotch[axis], delta);
+            delta = pidRuntime.dtermLowpassApplyFn((filter_t *) &pidRuntime.dtermLowpass[axis], delta);
+            delta = pidRuntime.dtermLowpass2ApplyFn((filter_t *) &pidRuntime.dtermLowpass2[axis], delta);
+
+            if (pidProfile->dtermDynNotchQ > 0 && pidProfile->dterm_dyn_notch_location == 1) {
+                fftDataAnalysePush(&pidRuntime.dtermFFTAnalyseState, axis, delta);
+                delta = pidRuntime.dtermDynNotchApplyFn((filter_t *)&pidRuntime.dtermNotchFilterDyn[axis], delta);
+            }
             float preTpaData = pidRuntime.pidCoefficient[axis].Kd * delta;
 
 #if defined(USE_D_MIN)
@@ -975,7 +1018,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile)
             }
         }
 
-        previousGyroRateDterm[axis] = gyroRateDterm[axis];
+        previousGyroRate[axis] = gyro.gyroADCf[axis];
 
 #if defined(USE_ACC)
             detectAndSetCrashRecovery(pidProfile->crash_recovery, axis, pidData[axis].D, errorRate);
@@ -1035,15 +1078,37 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile)
         }
 #endif
         // calculating the PID sum
+
+        // P boost at the end of throttle chop
+        // attenuate effect if turning more than 50 deg/s, half at 100 deg/s
+        float agBoostAttenuator = fabsf(currentPidSetpoint) / 50.0f;
+        if (agBoostAttenuator < 1.0f) {
+            agBoostAttenuator = 1.0f;
+        }
+        const float agPBoost = 1.0f + (pidRuntime.antiGravityPBoost / agBoostAttenuator);
+        pidData[axis].P *= agPBoost;
+        const float agDBoost = 1.0f + (pidRuntime.antiGravityDBoost / agBoostAttenuator);
+        pidData[axis].D *= agDBoost;
+
+        if (axis == FD_ROLL){
+            DEBUG_SET(DEBUG_ANTI_GRAVITY, 2, lrintf(agPBoost * 1000));
+            DEBUG_SET(DEBUG_ANTI_GRAVITY, 3, lrintf(agDBoost * 1000));
+        }
+
         const float pidSum = pidData[axis].P + pidData[axis].I + pidData[axis].D + pidData[axis].F;
-#ifdef USE_INTEGRATED_YAW_CONTROL
-        if (axis == FD_YAW && pidRuntime.useIntegratedYaw) {
-            pidData[axis].Sum += pidSum * pidRuntime.dT * 100.0f;
-            pidData[axis].Sum -= pidData[axis].Sum * pidRuntime.integratedYawRelax / 100000.0f * pidRuntime.dT / 0.000125f;
-        } else
-#endif
         {
             pidData[axis].Sum = pidSum;
+        }
+    }
+
+    if (pidProfile->dtermDynNotchQ > 0) {
+        fftDataAnalyse(&pidRuntime.dtermFFTAnalyseState);
+
+        if (pidRuntime.dtermFFTAnalyseState.filterUpdateExecute) {
+            const uint8_t axis = pidRuntime.dtermFFTAnalyseState.filterUpdateAxis;
+            const uint16_t frequency = pidRuntime.dtermFFTAnalyseState.filterUpdateFrequency;
+
+            biquadFilterUpdate(&pidRuntime.dtermNotchFilterDyn[axis], frequency, targetPidLooptime, pidProfile->dtermDynNotchQ / 100.0f, FILTER_NOTCH);
         }
     }
 

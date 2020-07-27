@@ -284,7 +284,7 @@ static const char * const lookupTableCameraControlMode[] = {
 
 static const char * const lookupTablePwmProtocol[] = {
     "PWM", "MULTISHOT", "BRUSHED",
-    "DSHOT150", "DSHOT300", "DSHOT600", "DSHOT1200", "DSHOT2400", "DSHOT4800" "PROSHOT1000",
+    "DSHOT150", "DSHOT300", "DSHOT600", "DSHOT1200", "DSHOT2400", "DSHOT4800", "PROSHOT1000",
     "DISABLED"
 };
 
@@ -661,7 +661,7 @@ const clivalue_t valueTable[] = {
     { "imuf_roll_q",                VAR_UINT16 | MASTER_VALUE, .config.minmax = { 0, 16000 }, PG_GYRO_CONFIG, offsetof(gyroConfig_t, imuf_roll_q) },
     { "imuf_pitch_q",               VAR_UINT16 | MASTER_VALUE, .config.minmax = { 0, 16000 }, PG_GYRO_CONFIG, offsetof(gyroConfig_t, imuf_pitch_q) },
     { "imuf_yaw_q",                 VAR_UINT16 | MASTER_VALUE, .config.minmax = { 0, 16000 }, PG_GYRO_CONFIG, offsetof(gyroConfig_t, imuf_yaw_q) },
-    { "imuf_w",                     VAR_UINT16 | MASTER_VALUE, .config.minmax = { 3, 300   }, PG_GYRO_CONFIG, offsetof(gyroConfig_t, imuf_w) },
+    { "imuf_w",                     VAR_UINT16 | MASTER_VALUE, .config.minmax = { 0, 300   }, PG_GYRO_CONFIG, offsetof(gyroConfig_t, imuf_w) },
     { "imuf_sharpness",             VAR_UINT16 | MASTER_VALUE, .config.minmax = { 0, 16000 }, PG_GYRO_CONFIG, offsetof(gyroConfig_t, imuf_sharpness) },
 #endif
 #ifdef USE_GYRO_OVERFLOW_CHECK
@@ -1058,11 +1058,26 @@ const clivalue_t valueTable[] = {
     { "dyn_lpf_dterm_curve_expo",   VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 10 }, PG_PID_PROFILE, offsetof(pidProfile_t, dyn_lpf_curve_expo) },
 #endif
     { "dterm_lowpass_type",         VAR_UINT8  | PROFILE_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_DTERM_LOWPASS_TYPE }, PG_PID_PROFILE, offsetof(pidProfile_t, dterm_filter_type) },
-    { "dterm_lowpass_hz",           VAR_INT16  | PROFILE_VALUE, .config.minmax = { 0, FILTER_FREQUENCY_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, dterm_lowpass_hz) },
+    { "dterm_lowpass_hz",           VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, FILTER_FREQUENCY_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, dterm_lowpass_hz) },
     { "dterm_lowpass2_type",        VAR_UINT8  | PROFILE_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_DTERM_LOWPASS_TYPE }, PG_PID_PROFILE, offsetof(pidProfile_t, dterm_filter2_type) },
-    { "dterm_lowpass2_hz",          VAR_INT16  | PROFILE_VALUE, .config.minmax = { 0, FILTER_FREQUENCY_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, dterm_lowpass2_hz) },
+    { "dterm_lowpass2_hz",          VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, FILTER_FREQUENCY_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, dterm_lowpass2_hz) },
     { "dterm_notch_hz",             VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, FILTER_FREQUENCY_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, dterm_notch_hz) },
     { "dterm_notch_cutoff",         VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, FILTER_FREQUENCY_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, dterm_notch_cutoff) },
+    { "dterm_dyn_notch_q",          VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 1000 }, PG_PID_PROFILE, offsetof(pidProfile_t, dtermDynNotchQ) },
+    { "dterm_dyn_notch_min",        VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 60, 400 }, PG_PID_PROFILE, offsetof(pidProfile_t, dterm_dyn_notch_min_hz) },
+    { "dterm_dyn_notch_max",        VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { 150, 1000 }, PG_PID_PROFILE, offsetof(pidProfile_t, dterm_dyn_notch_max_hz) },
+    { "dterm_dyn_notch_location",   VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 1 }, PG_PID_PROFILE, offsetof(pidProfile_t, dterm_dyn_notch_location) },
+#ifdef USE_DYN_LPF2
+    { "dynlpf2_fmin",                VAR_UINT16 | MASTER_VALUE, .config.minmax = { 0, 1000 },   PG_GYRO_CONFIG, offsetof(gyroConfig_t, dynlpf2_fmin) },
+    { "dynlpf2_fmax",                VAR_UINT16 | MASTER_VALUE, .config.minmax = { 0, 1000 },   PG_GYRO_CONFIG, offsetof(gyroConfig_t, dynlpf2_fmax) },
+    { "dynlpf2_gain",                VAR_UINT16 | MASTER_VALUE, .config.minmax = { 0,  200 },   PG_GYRO_CONFIG, offsetof(gyroConfig_t, dynlpf2_gain) },
+    { "dynlpf2_fc_fc",               VAR_UINT16 | MASTER_VALUE, .config.minmax = { 0,   50 },   PG_GYRO_CONFIG, offsetof(gyroConfig_t, dynlpf2_fc_fc) },
+    { "dynlpf2_center_threshold",    VAR_UINT16 | MASTER_VALUE, .config.minmax = { 0,  100 },    PG_GYRO_CONFIG, offsetof(gyroConfig_t, dynlpf2_center_threshold) },
+    { "dynlpf2_throttle_threshold",  VAR_UINT16 | MASTER_VALUE, .config.minmax = { 0,  100 },    PG_GYRO_CONFIG, offsetof(gyroConfig_t, dynlpf2_throttle_threshold) },
+    { "dynlpf2_throttle_gain",       VAR_UINT16 | MASTER_VALUE, .config.minmax = { 0,  200 },    PG_GYRO_CONFIG, offsetof(gyroConfig_t, dynlpf2_throttle_gain) },
+    { "dynlpf2_enable",              VAR_UINT8  | MASTER_VALUE, .config.minmax = { 0,    1 },    PG_GYRO_CONFIG, offsetof(gyroConfig_t, dynlpf2_enable) },
+    { "dynlpf2_type",                VAR_UINT8  | MASTER_VALUE, .config.minmax = { 0,    1 },    PG_GYRO_CONFIG, offsetof(gyroConfig_t, dynlpf2_type) },
+#endif
 #if defined(USE_BATTERY_VOLTAGE_SAG_COMPENSATION)
     { "vbat_sag_compensation",      VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 150 }, PG_PID_PROFILE, offsetof(pidProfile_t, vbat_sag_compensation) },
 #endif
@@ -1128,11 +1143,6 @@ const clivalue_t valueTable[] = {
     { "abs_control_limit",          VAR_UINT8 | PROFILE_VALUE,  .config.minmaxUnsigned = { 10, 255 }, PG_PID_PROFILE, offsetof(pidProfile_t, abs_control_limit) },
     { "abs_control_error_limit",    VAR_UINT8 | PROFILE_VALUE,  .config.minmaxUnsigned = { 1, 45 }, PG_PID_PROFILE, offsetof(pidProfile_t, abs_control_error_limit) },
     { "abs_control_cutoff",         VAR_UINT8 | PROFILE_VALUE,  .config.minmaxUnsigned = { 1, 45 }, PG_PID_PROFILE, offsetof(pidProfile_t, abs_control_cutoff) },
-#endif
-
-#ifdef USE_INTEGRATED_YAW_CONTROL
-    { "use_integrated_yaw",         VAR_UINT8  | PROFILE_VALUE | MODE_LOOKUP, .config.lookup = {TABLE_OFF_ON }, PG_PID_PROFILE, offsetof(pidProfile_t, use_integrated_yaw) },
-    { "integrated_yaw_relax",       VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 255 }, PG_PID_PROFILE, offsetof(pidProfile_t, integrated_yaw_relax) },
 #endif
 
 #ifdef USE_D_MIN

@@ -31,6 +31,7 @@
 #include "common/axis.h"
 #include "common/maths.h"
 #include "common/filter.h"
+#include "common/dynLpf2.h"
 
 #include "config/feature.h"
 
@@ -137,6 +138,17 @@ void pgResetFn_gyroConfig(gyroConfig_t *gyroConfig)
     gyroConfig->imuf_yaw_q = 5000;
     gyroConfig->imuf_w = 32;
     gyroConfig->imuf_sharpness = 2500;
+#ifdef USE_DYN_LPF2
+    gyroConfig->dynlpf2_fmin = DEFAULT_DYNLPF2_FMIN;
+    gyroConfig->dynlpf2_fmax = DEFAULT_DYNLPF2_FMAX;
+    gyroConfig->dynlpf2_gain = DEFAULT_DYNLPF2_GAIN;
+    gyroConfig->dynlpf2_fc_fc = DEFAULT_DYNLPF2_FC_FC;
+    gyroConfig->dynlpf2_center_threshold = DEFAULT_DYNLPF2_CENTER_THRESHOLD;
+    gyroConfig->dynlpf2_throttle_threshold = DEFAULT_DYNLPF2_THROTTLE_THRESHOLD;
+    gyroConfig->dynlpf2_throttle_gain = DEFAULT_DYNLPF2_THROTTLE_GAIN;
+    gyroConfig->dynlpf2_enable = DEFAULT_DYNLPF2_ENABLE;
+    gyroConfig->dynlpf2_type = DEFAULT_DYNLPF2_TYPE;
+#endif
 }
 
 bool isGyroSensorCalibrationComplete(const gyroSensor_t *gyroSensor)
@@ -457,9 +469,9 @@ FAST_CODE void gyroUpdate(void)
 
 #ifdef USE_GYRO_DATA_ANALYSE
 static void dynamicGyroNotchFiltersUpdate(gyro_t *gyro) {
-    if (gyro->gyroAnalyseState.filterUpdateExecute) {
-        const uint8_t axis = gyro->gyroAnalyseState.filterUpdateAxis;
-        const float frequency = gyro->gyroAnalyseState.filterUpdateFrequency;
+    if (gyro->fftAnalyseState.filterUpdateExecute) {
+        const uint8_t axis = gyro->fftAnalyseState.filterUpdateAxis;
+        const float frequency = gyro->fftAnalyseState.filterUpdateFrequency;
 
         DEBUG_SET(DEBUG_MATRIX_FILTER, axis, frequency);
 
@@ -480,7 +492,7 @@ FAST_CODE void gyroFiltering(timeUs_t currentTimeUs)
 
 #ifdef USE_GYRO_DATA_ANALYSE
     if (featureIsEnabled(FEATURE_DYNAMIC_FILTER)) {
-       gyroDataAnalyse(&gyro.gyroAnalyseState);
+       fftDataAnalyse(&gyro.fftAnalyseState);
        dynamicGyroNotchFiltersUpdate(&gyro);
     }
 #endif

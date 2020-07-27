@@ -783,7 +783,7 @@ static void writeInterframe(void)
     if (testBlackboxCondition(CONDITION(DEBUG_LOG))) {
         blackboxWriteMainStateArrayUsingAveragePredictor(offsetof(blackboxMainState_t, debug), DEBUG16_VALUE_COUNT);
     }
-    
+
     if (isFieldEnabled(FIELD_SELECT(MOTOR))) {
         blackboxWriteMainStateArrayUsingAveragePredictor(offsetof(blackboxMainState_t, motor),     getMotorCount());
 
@@ -1361,6 +1361,16 @@ static bool blackboxWriteSysinfo(void)
         BLACKBOX_PRINT_HEADER_LINE("dterm_lowpass_dyn_hz", "%d,%d",         currentPidProfile->dyn_lpf_dterm_min_hz,
                                                                             currentPidProfile->dyn_lpf_dterm_max_hz);
 #endif
+#ifdef USE_DYN_LPF2
+        BLACKBOX_PRINT_HEADER_LINE("dynlpf2_enable", "%d",                   gyroConfig()->dynlpf2_enable);
+        BLACKBOX_PRINT_HEADER_LINE("dynlpf2_type", "%d",                     gyroConfig()->dynlpf2_type);
+        BLACKBOX_PRINT_HEADER_LINE("dynlpf2_throttle_threshold", "%d",       gyroConfig()->dynlpf2_throttle_threshold);
+        BLACKBOX_PRINT_HEADER_LINE("dynlpf2_throttle_gain", "%d",            gyroConfig()->dynlpf2_throttle_gain);
+        BLACKBOX_PRINT_HEADER_LINE("dynlpf2_gain", "%d",                     gyroConfig()->dynlpf2_gain);
+        BLACKBOX_PRINT_HEADER_LINE("dynlpf2_fmin", "%d",                     gyroConfig()->dynlpf2_fmin);
+        BLACKBOX_PRINT_HEADER_LINE("dynlpf2_fmax", "%d",                     gyroConfig()->dynlpf2_fmax);
+        BLACKBOX_PRINT_HEADER_LINE("dynlpf2_fc_fc", "%d",                    gyroConfig()->dynlpf2_fc_fc);
+#endif
         BLACKBOX_PRINT_HEADER_LINE("dterm_filter2_type", "%d",              currentPidProfile->dterm_filter2_type);
         BLACKBOX_PRINT_HEADER_LINE("dterm_lowpass2_hz", "%d",               currentPidProfile->dterm_lowpass2_hz);
         BLACKBOX_PRINT_HEADER_LINE("yaw_lowpass_hz", "%d",                  currentPidProfile->yaw_lowpass_hz);
@@ -1380,9 +1390,6 @@ static bool blackboxWriteSysinfo(void)
         BLACKBOX_PRINT_HEADER_LINE("anti_gravity_gain", "%d",               currentPidProfile->itermAcceleratorGain);
 #ifdef USE_ABSOLUTE_CONTROL
         BLACKBOX_PRINT_HEADER_LINE("abs_control_gain", "%d",                currentPidProfile->abs_control_gain);
-#endif
-#ifdef USE_INTEGRATED_YAW_CONTROL
-        BLACKBOX_PRINT_HEADER_LINE("use_integrated_yaw", "%d",              currentPidProfile->use_integrated_yaw);
 #endif
         BLACKBOX_PRINT_HEADER_LINE("feedforward_transition", "%d",          currentPidProfile->feedForwardTransition);
         BLACKBOX_PRINT_HEADER_LINE("feedforward_weight", "%d,%d,%d",        currentPidProfile->pid[PID_ROLL].F,

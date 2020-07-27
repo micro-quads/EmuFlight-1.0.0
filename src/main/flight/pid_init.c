@@ -43,6 +43,7 @@
 
 #include "sensors/gyro.h"
 #include "sensors/sensors.h"
+#include "flight/gyroanalyse.h"
 
 #include "pid_init.h"
 
@@ -54,6 +55,7 @@
 #endif
 
 #define ANTI_GRAVITY_THROTTLE_FILTER_CUTOFF 15  // The anti gravity throttle highpass filter cutoff
+#define ANTI_GRAVITY_SMOOTH_FILTER_CUTOFF 3  // The anti gravity P smoothing filter cutoff
 
 static void pidSetTargetLooptime(uint32_t pidLooptime)
 {
@@ -75,6 +77,7 @@ void pidInitFilters(const pidProfile_t *pidProfile)
         pidRuntime.dtermLowpassApplyFn = nullFilterApply;
         pidRuntime.dtermLowpass2ApplyFn = nullFilterApply;
         pidRuntime.ptermYawLowpassApplyFn = nullFilterApply;
+        pidRuntime.dtermDynNotchApplyFn = nullFilterApply;
         return;
     }
 
@@ -166,6 +169,16 @@ void pidInitFilters(const pidProfile_t *pidProfile)
         pt1FilterInit(&pidRuntime.ptermYawLowpass, pt1FilterGain(pidProfile->yaw_lowpass_hz, pidRuntime.dT));
     }
 
+    if (pidProfile->dtermDynNotchQ > 0) {
+        fftDataAnalyseStateInit(&pidRuntime.dtermFFTAnalyseState, targetPidLooptime, pidProfile->dterm_dyn_notch_min_hz, pidProfile->dterm_dyn_notch_max_hz);
+
+        pidRuntime.dtermDynNotchApplyFn = (filterApplyFnPtr)biquadFilterApplyDF1; // must be this function, not DF2
+        for (int axis = 0; axis < XYZ_AXIS_COUNT; axis++) {
+            biquadFilterInit(&pidRuntime.dtermNotchFilterDyn[axis], 400, targetPidLooptime, pidProfile->dtermDynNotchQ / 100.0f, FILTER_NOTCH);
+        }
+    }
+
+
 #if defined(USE_THROTTLE_BOOST)
     pt1FilterInit(&throttleLpf, pt1FilterGain(pidProfile->throttle_boost_cutoff, pidRuntime.dT));
 #endif
@@ -202,6 +215,8 @@ void pidInitFilters(const pidProfile_t *pidProfile)
 #endif
 
     pt1FilterInit(&pidRuntime.antiGravityThrottleLpf, pt1FilterGain(ANTI_GRAVITY_THROTTLE_FILTER_CUTOFF, pidRuntime.dT));
+    pt1FilterInit(&pidRuntime.antiGravityPSmoothLpf, pt1FilterGain(ANTI_GRAVITY_SMOOTH_FILTER_CUTOFF, pidRuntime.dT));
+    pt1FilterInit(&pidRuntime.antiGravityDSmoothLpf, pt1FilterGain(ANTI_GRAVITY_SMOOTH_FILTER_CUTOFF, pidRuntime.dT));
 
     pidRuntime.ffBoostFactor = (float)pidProfile->ff_boost / 10.0f;
     pidRuntime.ffSpikeLimitInverse = pidProfile->ff_spike_limit ? 1.0f / ((float)pidProfile->ff_spike_limit / 10.0f) : 0.0f;
@@ -267,9 +282,6 @@ void pidInitConfig(const pidProfile_t *pidProfile)
         pidRuntime.pidCoefficient[axis].Kd = DTERM_SCALE * pidProfile->pid[axis].D;
         pidRuntime.pidCoefficient[axis].Kf = FEEDFORWARD_SCALE * (pidProfile->pid[axis].F / 100.0f);
     }
-#ifdef USE_INTEGRATED_YAW_CONTROL
-    if (!pidProfile->use_integrated_yaw)
-#endif
     {
         pidRuntime.pidCoefficient[FD_YAW].Ki *= 2.5f;
     }
@@ -305,7 +317,7 @@ void pidInitConfig(const pidProfile_t *pidProfile)
     // of AG activity without excessive display.
     pidRuntime.antiGravityOsdCutoff = 0.0f;
     if (pidRuntime.antiGravityMode == ANTI_GRAVITY_SMOOTH) {
-        pidRuntime.antiGravityOsdCutoff += ((pidRuntime.itermAcceleratorGain - 1000) / 1000.0f) * 0.25f;
+        pidRuntime.antiGravityOsdCutoff += (pidRuntime.itermAcceleratorGain / 1000.0f) * 0.25f;
     }
 
 #if defined(USE_ITERM_RELAX)
@@ -361,11 +373,6 @@ void pidInitConfig(const pidProfile_t *pidProfile)
         pidRuntime.launchControlAngleLimit = 0;
     }
     pidRuntime.launchControlKi = ITERM_SCALE * pidProfile->launchControlGain;
-#endif
-
-#ifdef USE_INTEGRATED_YAW_CONTROL
-    pidRuntime.useIntegratedYaw = pidProfile->use_integrated_yaw;
-    pidRuntime.integratedYawRelax = pidProfile->integrated_yaw_relax;
 #endif
 
 #ifdef USE_THRUST_LINEARIZATION
